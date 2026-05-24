@@ -1,0 +1,1020 @@
+---
+title: "Project 6019"
+output:
+  word_document: default
+  html_document: default
+date: "2025-08-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The below will be kept for all the directories which are required to run the model. 
+
+```{r}
+
+```
+
+Loading the three data files.
+Used the same name as the files to keep things simple.
+
+```{r}
+delay <- read.csv("delay.csv")
+delay_covariates <- read.csv("delay_covariates.csv")
+survey <- read.csv("survey.csv")
+```
+
+Checking the structure of "delay".
+
+```{r}
+str(delay)
+```
+
+Checking the structure of "delayed_covariates"
+
+```{r}
+str(delay_covariates)
+```
+
+Checking the structure of "survey"
+
+```{r}
+str(survey)
+```
+First, will find the common features between the first two datasets (delay, delay_covariates)
+Will be called common_col_del
+
+```{r}
+common_col_del <- intersect(colnames(delay), colnames(delay_covariates))
+print(common_col_del)
+```
+
+After that, will be combining the two datasets using those common features. Also fully merging to preserve all the data so later depends on the importance we can remove unwanted features.
+This will be called merged_del
+```{r}
+merged_del <- merge(delay, delay_covariates, by = c("program", "surveyid", "regionid", "districtid", "clusterid", "respondentid", "childid"), all= TRUE )
+```
+
+Finding common features between the new merged file and the survey data file
+will be called common_col
+
+```{r}
+common_col <- intersect(colnames(merged_del), colnames(survey))
+print(common_col)
+```
+
+Combing the already combined dataset with the survey data creating one final dataset which includes all the data from all 3 separate data files.
+Also will be using the full merge method to combine all the data.
+This will be called merged.
+
+```{r}
+merged <- merge(merged_del, survey, by = c("program", "surveyid", "phase", "surveyname", "country", "region", "subregion"), all = TRUE)
+```
+
+Checking the structure of the newly merged full document to get an idea
+
+```{r}
+str(merged)
+```
+Checking the missing values of longitude and latitude as it is the base of the project to map the data
+
+```{r}
+sum(is.na(merged$latitude))
+```
+
+```{r}
+sum(is.na(merged$longitude))
+```
+
+Removing the data without a value for longitude and latitude
+merged1 is the data set without NA in long and lat
+```{r}
+merged1 <- merged[!is.na(merged$latitude) & !is.na(merged$longitude), ]
+```
+
+Filtering Africa from the countries
+merged2 is the data with only Africa in its data
+```{r}
+library(dplyr)
+
+merged2 <- merged1 %>% 
+  filter(grepl("Africa", region, ignore.case = TRUE))
+```
+
+Count the cases based on the country
+```{r}
+country_count_all <- merged1 %>% 
+  count(country)
+print(country_count_all)
+
+country_count <- merged2 %>% 
+  count(country)
+print(country_count)
+```
+
+Creating a bar chart with the countries and the cases, high to low
+```{r}
+library(ggplot2)
+
+ggplot(country_count_all, aes(x = reorder(country,-n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Number of Cases by Country", x = "Country", y = "Number of cases") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+ggplot(country_count, aes(x = reorder(country,-n), y = n)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Number of Cases by Country in Africa", x = "Country", y = "Number of cases") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Creating the country maps using sf world
+Had to find devtools to get the add ones install in order to run rnaturalearth supporting
+and will isolate Africa in the map
+
+```{r}
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+sf_world <- ne_countries(scale= "large", returnclass= "sf")
+
+world <- sf_world %>% 
+  filter(continent == "Africa")
+```
+
+Converting long & lat to sf objects to map those on a sf map
+will be called merged2_sf
+```{r}
+# merged2_sf <- st_as_sf(merged2, coords = c("longitude", "latitude"), crs = 4326)
+```
+
+Mapping the data into a sf world map for visualization of malaria survey locations
+```{r}
+ggplot() +
+  geom_sf(data = sf_world, fill= "lightblue", color= "gray70") +
+  geom_point(data = merged1, aes(x = longitude, y = latitude, color= "red"), size = 0.5) +
+  theme_minimal() +
+  labs(title = "Data Visualization on Map", x = "Longitude", y = "Latitude")
+
+```
+merged3 - data without NA in days_to_seek and with delayed variables.
+
+Finding delays using the feature days_to_seek so checking for missing values.
+finding if there is any empty values and converting those to NA.
+Then will separate the data 
+as delayed if the days to seek is more than 1 day, if not will consider as not delayed.
+
+```{r}
+sum(is.na(merged2$days_to_seek))
+
+merged3 <- merged2 %>% 
+  mutate(days_to_seek = na_if(days_to_seek, "")) %>%
+  filter(!is.na(days_to_seek))
+
+merged3 <- merged3 %>%
+  mutate(delayed = if_else(days_to_seek >= 1, 1, 0))
+  
+```
+```{r}
+str(merged3)
+```
+```{r}
+sum(is.na(merged3$delayed))
+```
+
+Seeing if there any spelliing mistakes in the countries
+```{r}
+print(unique(merged3$country))
+```
+
+delay_per - Checking the percentage of delayed and non delayed cases to get an idea
+```{r}
+delay_per <- merged3 %>% 
+  count(delayed) %>% 
+  mutate(percentage = n / sum(n) * 100)
+
+delay_per
+```
+Plotting the percentages to visualize the ratio
+
+```{r}
+ggplot(delay_per, aes(x = factor(delayed), y = percentage, fill = factor(delayed))) +
+  geom_col() +
+  scale_fill_manual(values = c("0" = "green", "1" = "red")) +
+  labs(title = "Percentage of Delayed vs Not Delayed",
+       x = "Delayed (0 = No, 1 = yes)",
+       y = "Percentage") +
+  theme_minimal()
+```
+
+This same factor on the Africa map to identify the areas with more delays and no delays
+To do that changing the delayed information as factors
+```{r}
+merged3$delayed_factor <- factor(merged3$delayed,
+                                 levels = c(0,1),
+                                 labels = c("Not Delayed", "Delayed"))
+
+str(merged3)
+```
+```{r}
+merged1 <- merged1 %>% 
+  mutate(days_to_seek = na_if(days_to_seek, "")) %>%
+  filter(!is.na(days_to_seek))
+
+merged1 <- merged1 %>%
+  mutate(delayed = if_else(days_to_seek >= 1, 1, 0))
+
+merged1$delayed_factor <- factor(merged1$delayed,
+                                 levels = c(0,1),
+                                 labels = c("Not Delayed", "Delayed"))
+
+merged1_sf <- st_as_sf(merged1, coords = c("longitude", "latitude"), crs = 4326)
+
+ggplot() +
+  geom_sf(data = sf_world, fill = "lightblue", color = "gray70") +
+  geom_sf(data = merged1_sf, aes(color = delayed_factor), alpha = 0.7) +
+  scale_color_manual(values = c("blue", "red")) +
+  labs(title = "Delayed data on World Map",
+       color = "Delay Status") +
+  theme_minimal()
+```
+
+```{r}
+merged3_sf <- st_as_sf(merged3, coords = c("longitude", "latitude"), crs = 4326)
+
+ggplot() +
+  geom_sf(data = world, fill = "lightblue", color = "gray") +
+  geom_sf(data = merged3_sf, aes(color = delayed_factor), alpha = 0.7) +
+  scale_color_manual(values = c("blue", "red")) +
+  labs(title = "Delayed data on World Map - Africa",
+       color = "Delay Status") +
+  theme_minimal()
+```
+Same visualization without the use of sf 
+
+```{r}
+# ggplot() +
+#   geom_sf(data = world, fill = "lightblue", color = "gray60") +
+#   geom_point(data = merged3, aes(x = longitude, y = latitude, color = delayed_factor), size = 0.5) +
+#   scale_color_manual(values = c("blue", "red")) +
+#   theme_minimal() +
+#   labs(title = "Data in Africa Visualization on Map", x = "Longitude", y = "Latitude",
+#        color = "Delay Status")
+```
+
+Surveys are done in areas as clusters. so clusters can have more than one observation. This can affect the accuracy of the reading as the percentage of delays in an area can be 100% if there is only one person in a cluster and that person had delays in their treatment.
+Hence checking the cluster information.
+Will call this "cluster_count"
+```{r}
+cluster_count <- merged3_sf %>% 
+  filter(!is.na(year)) %>% # removing NA values from existing columns
+  group_by(program, surveyid, regionid, clusterid, country,delayed, delayed_factor, year) %>% 
+  summarise(count = n(), .groups = "drop") # this will count the number of rows per cluster
+# So the clusters will separate by all these factors which can possibly can isolate actual clusters of surveys
+head(cluster_count)
+str(cluster_count)
+```
+Visualization for a better understanding
+```{r}
+ggplot(cluster_count, aes(x = factor(year), y = count)) +
+  geom_bar(stat = "Identity", fill = "skyblue", color = "blue") +
+  labs(title = "Number of Entries Per Year",
+       x = "Survey year",
+       y = "Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+To get an idea of how many children are in a cluster, getting the count. Aggregate the data
+```{r}
+cluster_count_agg <- cluster_count %>% 
+  group_by(country, year) %>% 
+  summarise(total_clusters = sum(count, na.rm = TRUE)) %>% 
+  ungroup()
+```
+
+The total values in a plot for easy understanding below
+```{r}
+ggplot(cluster_count_agg, aes(x = country, y = total_clusters, fill = factor(year))) +
+  geom_bar(stat = "identity", position = "dodge") +
+    scale_fill_viridis_d() +
+  labs(title = "Number of Clusters per Country by Year",
+       x = "Country",
+       y = "Number of Clusters",
+       fill = "Year") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Clusters may have different numbers of cases depends on the survey carried on. Hence it is important to see the cluster information based on the numbers
+```{r}
+cluster_count <- cluster_count %>% 
+  mutate(cluster_size_category = case_when(
+    count == 1 ~ "1",
+    count == 2 ~ "2",
+    count == 3 ~ "3",
+    count == 4 ~ "4",
+    count == 5 ~ "5",
+    count > 5 ~ ">5"
+  ))
+```
+
+Calculating the proportions in the cluster data
+```{r}
+proportion_table <- cluster_count %>% 
+  group_by(cluster_size_category) %>% 
+  summarise(n = n()) %>% 
+  mutate(proportion = n / sum(n) * 100)
+```
+
+Calculating the proportions based on the country
+```{r}
+country_proportion_table <- cluster_count %>% 
+  group_by(country, year) %>% 
+  mutate(total_count_country = sum(count)) %>% 
+  group_by(country, clusterid) %>% 
+  summarise(cluster_count = sum(count),
+            proportion = cluster_count/ first(total_count_country) * 100) %>% 
+  ungroup()
+```
+
+calculating the proportions of the sum of the clusters 
+```{r}
+cluster_count_agg <- cluster_count_agg %>% 
+  group_by(country) %>% 
+  mutate(proportion = total_clusters / sum(total_clusters)* 100) %>% 
+  ungroup()
+
+str(country_proportion_table)
+  
+```
+View the results of the cluster distribution based on the year and the country on a stack chart
+```{r}
+ggplot(cluster_count_agg, aes(x = country, y = total_clusters, fill = factor(year))) +
+  geom_bar(stat = "identity") +
+  scale_fill_viridis_d() +
+  labs(title = "Number of Clusters per Country by Year",
+       x = "Country",
+       y = "Number of Clusters",
+       fill = "Year") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Summing total_clusters per country
+```{r}
+total_clusters_per_country <- cluster_count_agg %>% 
+  group_by(country) %>% 
+  summarise(total = sum(total_clusters))
+```
+
+Cluster distribution based on the year and country as proportions.
+This shows the total amount of clusters on the top while showing the percentage of the clusters based on the year for each country
+```{r}
+library(scales)
+ggplot(cluster_count_agg, aes(x = country, y = total_clusters, fill = factor(year))) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_viridis_d() +
+  scale_y_continuous(labels = percent_format()) +
+  labs(title = "Proportion of Clusters per Country by Year",
+       x = "Country",
+       y = "Proportion of Clusters",
+       fill = "Survey Year") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_text(data = total_clusters_per_country,
+            aes(x = country, y = 1.05, label = total),
+            inherit.aes = FALSE, size = 3, angle = 45, vjust = 0)
+```
+
+Convert cluster size category to a factor to maintain order in the plot
+```{r}
+proportion_table$cluster_size_category <- factor(proportion_table$cluster_size_category,
+                                                 levels = c("1", "2", "3", "4", "5", ">5"))
+```
+
+Creating a bar chart with cluster categories and counts
+```{r}
+ggplot(proportion_table, aes(x = cluster_size_category, y = n, fill = cluster_size_category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Cluster Counts Distribution", x = "Cluster Size Category", y = "Count") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2")
+```
+
+Creating a bar chart with cluster categories and counts but the bar chart based on the proportions which is basically the same chart but as precentage
+```{r}
+ggplot(proportion_table, aes(x = cluster_size_category, y = proportion, fill = cluster_size_category)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Cluster Proportion Distribution", x = "Cluster Size Category", y = "Proportion (%)") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set2")
+```
+
+cluster categories and counts information on a world map. This shows all the cluster numbers (based on how many are in a cluster) as a proportion
+```{r}
+ggplot() +
+  geom_sf(data = world, fill = "grey92", color = "grey70") +
+  geom_sf(data = proportion_table,
+          aes(size = proportion, color = proportion),
+          alpha = 0.4) +
+  scale_size_continuous(range = c(1,6)) +
+  scale_color_viridis_c() +
+  labs(title = "Cluster Proportions on World Map",
+       size = "Proportion",
+       color = "Proportion") +
+  theme_minimal()
+```
+
+Plotting based on the cluster id, countries and proportion. Just because the information is there. Readability of the plot is not that great
+```{r}
+# plotting based on the cluster id, countries and proportion
+ggplot(country_proportion_table, aes(x = factor(clusterid), y = proportion, fill = country)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Cluster Count Distribution by Country", x = "Cluster ID", y = "Proportion") +
+  theme_minimal() 
+```
+
+Cluster count by country
+```{r}
+ggplot(cluster_count_agg, aes(x = country, y = total_clusters)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Cluster Count by Country",
+       x = "Country",
+       y = "Cluster Count") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Plot the world map and overlay the cluster proportion points. This shows the proportion as a whole from the full clusters. Example: from 100% how much is clusderid 1 has.
+```{r}
+ggplot() +
+  geom_sf(data = world, fill = "grey90", color = "black") +
+  geom_sf(data = country_proportion_table,
+          aes(size = proportion, color = proportion),
+          alpha = 0.4) +
+  scale_size_continuous(range = c(1,6)) +
+  scale_color_viridis_c() +
+  labs(title = "Cluster Proportions on World Map",
+       size = "Proportion",
+       color = "Proportion") +
+  theme_minimal()
+```
+
+Separating the cluster information based on the delayed factor
+```{r}
+cluster_counts_delay <- cluster_count %>% 
+  group_by(program,country, year, surveyid, delayed, delayed_factor) %>% 
+  summarise(cluster_counts = n(), .groups = "drop")
+```
+
+Computing the Proportions per country and year based on delayed information
+```{r}
+cluster_counts_delay <- cluster_counts_delay %>% 
+  group_by(country) %>% 
+  mutate(total_clusters = sum(cluster_counts),
+         proportion = cluster_counts/ total_clusters*100)
+```
+
+Visualizing the delayed information based country
+```{r}
+ggplot(cluster_counts_delay, aes(x = reorder(country, -proportion), y = cluster_counts, fill = delayed_factor)) +
+  geom_bar(stat = "identity", position = "dodge") +  # Side-by-side bars
+  labs(title = "Cluster Count by Country and Delay Status",
+       x = "Country",
+       y = "Cluster Count",
+       fill = "Delay Status") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+```
+
+```{r}
+# Remove geometry temporarily
+cluster_counts_delay_no_geom <- st_drop_geometry(cluster_counts_delay)
+
+library(tidyr)
+# Calculate the delayed percentage per country
+delay_percentage <- cluster_counts_delay_no_geom %>%
+  group_by(country, delayed_factor) %>%
+  summarise(total = sum(cluster_counts), .groups = "drop") %>%
+  pivot_wider(names_from = delayed_factor, values_from = total, values_fill = list(total = 0)) %>%
+  mutate(delayed_percentage = `Delayed` / (`Not Delayed` + `Delayed`)) %>%
+  select(country, delayed_percentage)  # Keep only relevant columns
+
+# Merge back with the original sf object (keeping geometry)
+cluster_counts_delay <- cluster_counts_delay %>%
+  left_join(delay_percentage, by = "country")
+
+# Reorder countries based on delayed percentage
+ggplot(cluster_counts_delay, aes(x = reorder(country, delayed_percentage), y = proportion, fill = delayed_factor)) +
+  geom_bar(stat = "identity", position = "fill") +  # Stacked bar chart (normalized to 100%)
+  scale_y_continuous(labels = percent_format(scale = 100)) +  # Show as percentage
+  labs(title = "Proportion of Delayed vs. Not Delayed Clusters by Country (Sorted by Delay %)",
+       x = "Country",
+       y = "Percentage of Clusters",
+       fill = "Delay Status") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+```
+
+Trying to separate by year as well
+```{r}
+cluster_counts_delay_year <- cluster_counts_delay %>% 
+  group_by(country, year) %>% 
+  mutate(total_clusters = sum(cluster_counts),
+         proportion = cluster_counts/ total_clusters*100)
+```
+
+Proportion of Cluster Counts by Country, Year, and Delay Status in a plot. This shows all the delayed and non delayed infromation which kind of looks confusing
+```{r}
+ggplot(cluster_counts_delay_year, aes(x = year, y = proportion, color = country, shape = delayed_factor)) +
+  geom_point(size = 3) +
+  geom_line() +
+  theme_minimal()
+```
+
+Proportion of Cluster Counts by Country, Year, and Delay Status in a plot to make it look less complicated
+```{r}
+ggplot(cluster_counts_delay_year %>% filter(delayed_factor=="Delayed"),
+       aes(x = year, y = proportion, color = country)) +
+  geom_point(size = 4, alpha = 0.7) +
+  geom_line(size = 1, alpha = 0.3) +
+  labs(title = "Proportion of Cluster Counts by Country, Year for Delayed Data",
+       x = "Survey Year",
+       y = "Proportion (%)",
+       color = "Country"
+       ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Plotting the cluster information based on the country and proportion for delayed data on a map. it is not the easiest to read because of all the colors and sizes
+```{r}
+ggplot() +
+  geom_sf(data = world, fill = "lightblue", color = "gray60") +
+  geom_sf(data = cluster_counts_delay_year, aes(color = factor(year), size = proportion), alpha = 0.3) +
+  scale_fill_viridis_d() +
+  labs(title = "Delayed Data on World Map Based on Year",
+       color = "Year",
+       size = "Proportion") +
+  theme_minimal() +
+  theme(
+    legend.position = c(1.25, 0.55),  # Moves legend inside the plot (adjust as needed)
+    legend.key.size = unit(0.4, "cm"),  # Decrease legend key size
+    legend.text = element_text(size = 8),  # Reduce text size
+    legend.title = element_text(size = 9),  # Reduce title size
+    legend.spacing.x = unit(0.3, 'cm')  # Reduce spacing between legend items
+  ) +
+  guides(size = guide_legend())
+```
+
+Because of that trying to animate Base plot.
+Plotting the cluster information based on the country and proportion for delayed data on a map with face wrap to show a new map for each year
+```{r}
+library(gganimate)
+animated_map <- ggplot() +
+  geom_sf(data = world, fill = "lightblue", color = "gray60") +
+  geom_sf(data = cluster_counts_delay_year, aes(color = factor(year), size = proportion), alpha = 0.7) +
+  scale_color_viridis_d() +
+  labs(title = "Delayed Data on World Map (Year: {closest_state})") +
+  theme_minimal() +
+  theme(
+    legend.position = "none"  # 👈 Removes legend entirely
+  ) +
+  transition_states(year, transition_length = 1, state_length = 2)
+
+# Render the animation
+#animate(animated_map, fps = 5, duration = 10, width = 800, height = 600, renderer = gifski_renderer("animated_map.gif"))
+```
+
+A map for each year with delayed data in it
+```{r}
+library(viridis)
+
+ggplot() +
+  geom_sf(data = world, fill = "gray95", color = "gray60") +
+  geom_sf(data = cluster_counts_delay_year, aes(color = proportion), alpha = 0.7) +
+  scale_color_viridis() +
+  labs(title = "Delayed Data on World Map Based on year",
+       color = "Proportion") +
+  facet_wrap("year") +
+  theme_minimal() +
+  theme(
+    legend.position = c(1.25, 0.55),  # Moves legend inside the plot (adjust as needed)
+    legend.key.size = unit(0.4, "cm"),  # Decrease legend key size
+    legend.text = element_text(size = 8),  # Reduce text size
+    legend.title = element_text(size = 9),  # Reduce title size
+    legend.spacing.x = unit(0.3, 'cm')  # Reduce spacing between legend items
+  ) +
+  guides(size = guide_legend(override.aes = list(size = c(2, 4, 6))))
+```
+
+
+
+
+
+
+--- Modelling for Predictions ---
+
+
+For data preparation for modelling,
+Will be using the processed data from the merged3_sf and there are survey questions like did they have fever, cough and more. All those are yes/no answers hence we will be converting those into 1/0 and NA for missing information so we can use those as factors to predict on.
+```{r}
+merged3_sf$fever <- ifelse(merged3_sf$fever == "yes",1,
+                           ifelse(merged3_sf$fever == "no", 0, NA))
+
+merged3_sf$cough <- ifelse(merged3_sf$cough == "yes",1,
+                           ifelse(merged3_sf$cough == "no", 0, NA))
+
+merged3_sf$any_treatment <- ifelse(merged3_sf$any_treatment == "yes",1,
+                                   ifelse(merged3_sf$any_treatment == "no", 0, NA))
+
+merged3_sf$health_facility <- ifelse(merged3_sf$health_facility == "yes",1,
+                                     ifelse(merged3_sf$health_facility == "no", 0, NA))
+
+merged3_sf$any_medicine <- ifelse(merged3_sf$any_medicine == "yes",1,
+                                  ifelse(merged3_sf$any_medicine == "no", 0, NA))
+
+```
+
+Converting relevant colums to proper data types
+```{r}
+merged3_sf$delayed_factor <- factor(merged3_sf$delayed_factor)
+merged3_sf$urban_rural <- factor(merged3_sf$urban_rural)
+```
+
+Convert other variables to numeric if they are not
+```{r}
+merged3_sf$days_to_seek <- as.numeric(merged3_sf$days_to_seek)
+merged3_sf$days_to_antimalarial <- as.numeric(merged3_sf$days_to_antimalarial)
+merged3_sf$age_months_calculated <- as.numeric(merged3_sf$age_months_calculated)
+merged3_sf$wealth_quintile <- as.numeric(merged3_sf$wealth_quintile)
+merged3_sf$mother_age <- as.numeric(merged3_sf$mother_age)
+merged3_sf$fever <- as.numeric(merged3_sf$fever)
+merged3_sf$cough <- as.numeric(merged3_sf$cough)
+merged3_sf$any_treatment <- as.numeric(merged3_sf$any_treatment)
+merged3_sf$health_facility <- as.numeric(merged3_sf$health_facility)
+
+str(merged3_sf)
+```
+
+__ Modelling __
+
+-- Logistic Regression --
+```{r}
+model <- glm(delayed ~ days_to_seek + days_to_antimalarial + 
+               age_months_calculated + wealth_quintile + urban_rural + mother_age + fever + 
+               cough + health_facility,
+             data = merged3_sf, family = binomial)
+```
+
+Display model summary to see the significance of predictors
+```{r}
+summary(model)
+```
+What can we get from the above results,
+A logistic regression model was fitted to explore the relationship between delayed malaria treatment and several predictors including days_to_seek, days_to_antimalarial, wealth_quintile, urban_rural, mother_age, fever, cough, and health_facility.
+
+However, the model encountered convergence issues, indicated by warnings stating “algorithm did not converge” and “fitted probabilities numerically 0 or 1 occurred.” These errors suggest the presence of perfect separation or extreme class imbalance in the data, where some predictors perfectly determine whether a case is delayed.
+
+As a result, the coefficients show abnormally large standard errors and non-significant p-values (all = 1.000), meaning the estimates are not reliable. The model’s AIC value was 20, but due to non-convergence, it cannot be interpreted meaningfully.
+
+In summary, the model failed to converge properly, and further adjustments such as reducing multicollinearity, balancing the dataset, or using a regularized regression approach (LASSO or Ridge) are needed before valid inferences can be made.
+
+
+
+Model coefficient
+```{r}
+exp(coef(model))
+```
+Results,
+The exponentiated coefficients (odds ratios) from the logistic regression provide insight into how each variable affects the likelihood of treatment delay.
+	*	days_to_seek (5.24e+20) shows an extremely large odds ratio, suggesting instability or perfect separation in the data — a small change in this variable results in a very large shift in the probability of delay.
+	* days_to_antimalarial (1.31) indicates a small positive association with delay — higher values slightly increase the odds of delay.
+	*	age_months_calculated (1.00) shows almost no effect, meaning age does not significantly influence delay.
+	* wealth_quintile (0.99) and urban_rural (0.95) have odds ratios close to 1, implying negligible effect on delay likelihood.
+  *	mother_age (0.99) also shows minimal influence.
+  * fever (1.00) and health_facility (1.23) have weak positive associations, but given earlier model instability, these results should be interpreted cautiously.
+
+Overall, the extremely large odds ratio for days_to_seek and uniformity of other predictors suggest model convergence issues rather than meaningful relationships. Refinement of the model or rescaling of variables is recommended for more reliable interpretation.
+
+
+Checking for multicollinearity
+```{r}
+library(car)
+
+vif(model)
+```
+Result,
+Variance Inflation Factor (VIF) values were calculated to assess multicollinearity among predictors in the logistic regression model. All predictors, including days_to_seek, days_to_antimalarial, wealth_quintile, urban_rural, mother_age, fever, cough, and health_facility, showed VIF values between 1.01 and 1.23.
+
+These results indicate no significant multicollinearity, confirming that the predictor variables are independent and do not exhibit strong linear relationships with each other. This ensures the model’s coefficient estimates remain stable and reliable.
+
+
+Adding interaction terms glm logistic regression
+```{r}
+model_interaction <- glm(delayed ~ (days_to_seek + days_to_antimalarial + 
+                                             age_months_calculated + wealth_quintile + urban_rural + mother_age + fever + 
+                                             cough + health_facility)^2,
+                         data = merged3_sf, family = binomial)
+```
+
+Summary with interaction terms
+```{r}
+summary(model_interaction)
+```
+An extended logistic regression model was fitted including all main effects and two-way interaction terms between predictors. This model aimed to explore potential interdependence — for instance, whether the impact of days_to_seek on delay differs by health_facility access or urban_rural context.
+
+Although the model successfully converged after 25 Fisher scoring iterations, the p-values indicate that most interaction effects were not statistically significant, suggesting that the predictors act largely independently in influencing delay outcomes. The AIC value of 92 reflects a better fit compared to simpler models, though the improvement is modest.
+
+Overall, this extended model demonstrates that primary predictors such as health facility access and treatment-seeking delay remain the dominant influences, while combined interaction effects contribute minimally to explaining additional variation in treatment delay.
+
+
+Model odds ratio
+```{r}
+exp(coef(model_interaction))
+```
+Results,
+After exponentiation the model coefficients, the resulting odds ratios illustrate how each variable and its interactions affect the likelihood of delayed malaria treatment.
+
+Key findings include:
+	*	Days to seek treatment (OR ≈ 2.1 × 10²¹) indicates that even small increases in delay before seeking treatment substantially raise the odds of overall treatment delay.
+	*	Days to antimalarial (OR ≈ 3.46) also shows a strong positive association, confirming its major influence on delayed outcomes.
+	*	Interaction terms such as days_to_seek × health_facility (OR ≈ 1.36) and urban_rural × fever (OR ≈ 1.66) suggest that access to healthcare and contextual factors like location may slightly modify the effect of individual predictors.
+	*	However, most interaction odds ratios are close to 1, implying minimal combined effects and reinforcing that main effects remain the dominant drivers of delay.
+
+Overall, the model supports that treatment-seeking behavior and access to health facilities are the most critical determinants of delayed malaria care among children under 5 in Africa.
+
+-- Ridge and Lasso --
+Lasso Logistic Regression
+```{r}
+library(glmnet)
+# Checking all the columns with massive missing values
+colSums(is.na(merged3_sf))
+
+# Removing the found columns from the above
+merged3_sf <- merged3_sf %>%
+  select(-districtid, -days_to_act, -age_months, -antimalarial_duration, -act_duration) 
+# Remove rows with missing values
+merged_clean <- na.omit(merged3_sf)
+# Remove geometry column
+merged_clean_df <- st_drop_geometry(merged_clean)  # Drops the spatial geometry
+
+# Convert categorical variables to numeric
+merged_clean_df$urban_rural <- as.numeric(as.factor(merged_clean_df$urban_rural))
+merged_clean_df$delayed_factor <- as.numeric(as.factor(merged_clean_df$delayed_factor)) - 1  # Convert to 0/1
+
+# Define predictor variables (making sure all are numeric)
+x_clean <- as.matrix(merged_clean_df[, c("days_to_seek", "days_to_antimalarial", 
+                                         "age_months_calculated", "wealth_quintile", 
+                                         "urban_rural", "mother_age", "fever", "cough", "health_facility")])
+
+# Define response variable
+y_clean <- merged_clean_df$delayed_factor  # Already numeric
+
+# Check for missing values and remove rows if necessary
+missing_rows <- apply(x_clean, 1, function(row) any(is.na(row)))
+x_clean <- x_clean[!missing_rows, ]
+y_clean <- y_clean[!missing_rows ]
+
+# Run Lasso regression
+model_lasso <- cv.glmnet(x_clean, y_clean, family = "binomial", alpha = 1)
+
+summary(model_lasso)
+
+plot(model_lasso)
+```
+To identify the most influential predictors contributing to malaria treatment delays, a LASSO (Least Absolute Shrinkage and Selection Operator) logistic regression model was applied. The model was fitted using the variables days_to_seek, days_to_antimalarial, age_months_calculated, wealth_quintile, urban_rural, mother_age, fever, cough, and health_facility.
+
+LASSO was chosen because it performs both variable selection and regularization, minimizing overfitting while retaining only the strongest predictors. The plot of binomial deviance against the log of λ shows that the deviance decreases rapidly before stabilizing, indicating that a small number of variables are sufficient to explain most of the variation in the data.
+
+Based on the cross-validation results, the model highlights that:
+	*	Days to seek treatment and days to antimalarial were the strongest predictors of treatment delay, confirming that longer response times substantially increase the likelihood of delay.
+	*	Health facility also remained influential, suggesting that access to healthcare infrastructure plays a significant role in timely treatment.
+	*	Variables such as wealth_quintile and urban_rural were moderately influential, whereas fever, cough, and mother_age were penalized toward zero, indicating weaker associations.
+
+Overall, the LASSO regression effectively narrowed the predictor set to the most critical variables influencing malaria treatment delay, improving interpretability and forming a strong foundation for subsequent spatial or predictive modeling.
+
+Ridge Logistic Regression
+```{r}
+model_ridge <- cv.glmnet(x_clean, y_clean, family = "binomial", alpha = 0)
+
+summary(model_ridge)
+
+plot(model_ridge)
+```
+To complement the LASSO model, a Ridge regression was conducted using the same predictor variables to assess the stability and relative importance of all features. Unlike LASSO, which performs variable selection by shrinking some coefficients to zero, Ridge regression penalizes large coefficients while retaining all predictors in the model. This approach is particularly useful when predictors are correlated or when the goal is to minimize overall model variance rather than feature elimination.
+
+The Ridge regression deviance plot shows a smooth decline in binomial deviance as λ increases, gradually stabilizing at a minimum value. This pattern indicates that the model achieved a good bias–variance trade-off through regularization, preventing overfitting while preserving predictive power.
+
+Compared to LASSO:
+	*	Ridge regression retained all predictors, suggesting that each variable contributed some level of information to explaining the likelihood of treatment delays.
+	*	Stronger weights were still associated with days_to_seek, days_to_antimalarial, and health_facility, reinforcing their critical role in predicting delay outcomes.
+	*	Variables such as age_months_calculated, wealth_quintile, and urban_rural remained moderately influential, while mother_age, fever, and cough had lower effect magnitudes.
+
+In summary, Ridge regression provided a more stable model that distributed influence across predictors rather than excluding weaker ones. The results complement the LASSO findings, confirming the dominance of treatment-seeking behavior and healthcare access as major determinants of malaria treatment delay among children under five in Africa.
+
+
+Interpret what LASSO and RIDGE actually found
+```{r}
+coef(model_lasso, s = "lambda.min")
+coef(model_ridge, s = "lambda.min")
+```
+Both LASSO (α = 1) and Ridge (α = 0) regression models were trained using the same predictor variables to analyze factors influencing malaria treatment delay among children under five in Africa.
+
+Under the optimal λ (lambda.min), the results show clear differences in model behavior:
+	**	LASSO Regression:
+	*	Selected only two predictors — days_to_seek (β ≈ 14.05) and days_to_antimalarial (β ≈ 0.16) — indicating that these are the strongest and most direct contributors to predicting treatment delay.
+	*	All other coefficients were shrunk to zero, meaning those variables had minimal unique explanatory power once days_to_seek and days_to_antimalarial were included.
+	*	This demonstrates strong sparsity and effective feature selection, simplifying the model and highlighting key drivers of delay.
+	
+	**	Ridge Regression:
+	*	Retained all predictors with smaller, nonzero coefficients.
+	*	The highest effects were again seen for days_to_seek (β ≈ 4.49) and days_to_antimalarial (β ≈ 9.49e-01), reinforcing their dominant influence.
+	*	Other predictors such as health_facility, cough, and fever also showed small but meaningful weights, suggesting that Ridge captures minor but potentially cumulative effects across correlated features.
+	*	This reflects Ridge’s ability to stabilize coefficients without completely eliminating variables, especially when multicollinearity exists.
+
+Interpretation Summary:
+	*	Both models consistently identify treatment-seeking delay (days_to_seek) and time to receive antimalarial treatment (days_to_antimalarial) as the most significant predictors.
+	*	LASSO simplifies the model by isolating only the most influential factors, ideal for interpretability.
+	*	Ridge maintains all predictors, making it more robust for prediction in complex, correlated datasets.
+	*	Together, they confirm that timing and access-related variables are central determinants of malaria treatment delay, while demographic and symptom variables play secondary roles.
+
+
+Simple Linear Regression (Checking Direct Relationships)
+```{r}
+lm_model <- lm(delayed ~ days_to_seek + days_to_antimalarial + 
+                 age_months_calculated + wealth_quintile + urban_rural + mother_age + fever + 
+                 cough + health_facility, 
+               data = merged3_sf)
+summary(lm_model)  # Check R-squared and p-values
+
+```
+A multiple linear regression analysis was conducted to examine how treatment-seeking behaviour, time to antimalarial treatment, and various demographic and socioeconomic factors relate to delays in malaria treatment among children under five. The model achieved an R-squared of 0.2748 and an adjusted R-squared of 0.2745, indicating that approximately 27% of the variance in treatment delay could be explained by the selected predictors. The overall model was statistically significant (F(9, 22273) = 937.7, p < 2e-16), confirming that the variables collectively contribute to predicting delay outcomes. Among all predictors, days_to_seek and days_to_antimalarial were the strongest determinants (both p < 2e-16), showing that longer waiting times before seeking or obtaining treatment significantly increase the likelihood of delay. Wealth_quintile (p = 0.0161) and mother_age (p = 0.0344) also showed moderate significance, suggesting that socioeconomic status and caregiver age influence access and timing of care. Health_facility was another highly significant predictor (p < 2e-16), highlighting the critical role of healthcare access in determining prompt treatment. In contrast, fever (p = 0.089) and urban_rural (p = 0.215) were not statistically significant, indicating limited influence on treatment delay when considered independently. Overall, these findings confirm that behavioural factors such as treatment-seeking time and access to health facilities are the most influential contributors to delay, while demographic and contextual factors play a secondary but supportive role.
+
+Odds ratio
+```{r}
+exp(coef(lm_model))
+```
+The odds ratio analysis provides a clearer understanding of how each predictor variable influences the likelihood of delayed malaria treatment. An odds ratio (OR) greater than 1 indicates an increased likelihood of delay, while an OR less than 1 indicates a decreased likelihood. The results show that both days_to_seek (OR = 1.08) and days_to_antimalarial (OR = 1.10) increase the odds of delay — meaning that for every additional day taken to seek care or receive antimalarial treatment, the likelihood of delay rises by approximately 8% and 10%, respectively. The variable health_facility (OR = 1.06) also slightly increases the odds, suggesting that certain facility-related factors may contribute to longer treatment times. In contrast, variables such as wealth_quintile (OR = 0.99), urban_rural (OR = 0.99), and mother_age (OR = 0.99) slightly reduce the odds, implying that higher wealth, urban residence, or older maternal age may offer minor protective effects against delay. Other factors like fever (OR = 0.98) and cough (OR = 1.01) showed minimal effect on delay likelihood. Overall, behavioural factors—particularly time to seek and time to treatment—remain the most influential predictors of delayed care, aligning with the regression findings.
+
+
+
+Generalized Linear Mixed Model (GLMM) (if hierarchical structure exists)
+```{r}
+library(lme4)
+
+# # Convert the factor 'urban_rural' to numeric (e.g., using as.numeric)
+# merged3_sf$urban_rural <- as.numeric(merged3_sf$urban_rural)
+# 
+# # Standardizing the predictors
+# merged3_std <- merged3_sf %>%
+#   st_drop_geometry() %>%
+#   mutate(across(c("days_to_seek", "days_to_antimalarial", "age_months_calculated",
+#                   "wealth_quintile", "urban_rural", "mother_age"), scale))
+# 
+# glmm_model <- glmer(y_clean ~ days_to_seek + days_to_antimalarial +
+#                       age_months_calculated + wealth_quintile + urban_rural + mother_age + fever +
+#                       cough + health_facility + (1 | country),
+#                     data = merged3_std,
+#                     family = binomial)
+```
+Error in complete.cases(merged3_std, y_clean) : 
+  not all arguments have the same length
+  
+  
+--Visualizing-- 
+```{r}
+# Getting coefficients and p-values from logistic model
+coef_data <- as.data.frame(summary(model)$coefficients)
+coef_data$Variable <- rownames(coef_data)
+
+# Plot coefficients with 95% confidence intervals
+ggplot(coef_data, aes(x = reorder(Variable, Estimate), y = Estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = Estimate - 1.96 * `Std. Error`, ymax = Estimate + 1.96 * `Std. Error`), width = 0.2) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Logistic Regression Coefficients",
+       x = "Variables",
+       y = "Estimate")
+
+# Plot coef with log
+ggplot(coef_data, aes(x = reorder(Variable, Estimate), y = abs(Estimate))) +
+  geom_point() +
+  scale_y_log10() +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Log-Scaled Coefficients",
+       x = "Variables",
+       y = "Absolute Estimate (log scale)")
+
+# Lasso model plot
+plot(model_lasso)
+
+# Ridge model plot
+plot(model_ridge)
+
+
+# Plot residuals
+plot(resid(model), main = "Residuals of Logistic Regression Model", ylab = "Residuals")
+```
+
+Logistic Regression Coefficients
+
+The coefficient plot visualizes the estimated effects of each predictor on the likelihood of treatment delay, along with 95% confidence intervals.
+	*	Predictors such as days_to_seek, days_to_antimalarial, and health_facility show the largest effect sizes, suggesting they are the strongest determinants of delay.
+	*	Wider confidence intervals (e.g., for fever) indicate greater uncertainty in estimation, possibly due to low variation or missing data.
+	*	The coefficients centered around zero (e.g., urban_rural, mother_age) imply a weaker or negligible direct association with the response variable after accounting for other factors.
+
+LASSO Model
+
+The LASSO (Least Absolute Shrinkage and Selection Operator) plot shows how the model’s deviance changes with increasing regularization strength (λ).
+	*	The sharp decline in binomial deviance followed by a plateau indicates that the model quickly reached its optimal complexity.
+	*	The LASSO model penalizes less informative variables by shrinking their coefficients toward zero, effectively performing feature selection.
+	*	In this case, days_to_seek, days_to_antimalarial, and health_facility likely remained as key predictors while others were regularized out.
+
+Ridge Regression
+
+The Ridge regression plot demonstrates a smoother curve compared to LASSO, as Ridge tends to shrink all coefficients toward zero but retains all variables in the model.
+	*	This is particularly useful when predictors are correlated (multicollinearity).
+	*	The gradual reduction in deviance with log(λ) confirms that the Ridge model improves stability without completely excluding predictors.
+
+Residual Plot
+
+The residual plot helps assess model fit and potential outliers.
+	*	The residuals appear evenly distributed around zero, with no distinct pattern — suggesting that the model fits reasonably well and that the assumptions of independence and homoscedasticity are not severely violated.
+	*	The presence of dense clustering at certain residual levels may reflect repeated or binary outcomes typical of logistic regression.
+
+
+Fit GAMM with one or more smooth terms and a random intercept for 'country'
+```{r}
+# Load the library
+library(gamm4)
+
+gamm_model <- gamm4(
+  formula = delayed ~ s(days_to_seek, k = 5) + 
+    s(days_to_antimalarial, k = 5) + 
+    s(age_months_calculated, k = 5) +
+    wealth_quintile + urban_rural + mother_age + fever + cough + health_facility,
+  random = ~(1 | country),
+  data = merged3_sf
+)
+
+# View the summary of the GAM part
+summary(gamm_model$gam)
+
+# View the summary of the mixed model part
+summary(gamm_model$mer)
+```
+Model Fit
+	*	The model achieved an adjusted R² = 0.587, indicating that approximately 58.7% of the variability in malaria treatment delay is explained by the predictors included.
+	*	The REML criterion (3780.6) and residual standard deviation (0.087) suggest a reasonable fit for a complex model that balances flexibility (via smooth terms) with generalization (via random effects).
+
+Smooth Terms
+	*	The smooth terms for days_to_seek and days_to_antimalarial are highly significant (p < 0.001), confirming nonlinear relationships with delay.
+	*	The shape of these effects (captured by the estimated degrees of freedom edf ≈ 3.99) implies that increases in these values have varying impacts — small initial increases may strongly affect delay, which then plateaus at higher values.
+	*	The smooth term for age_months_calculated is not significant (p = 0.832), indicating a limited nonlinear contribution from child age to treatment delay.
+
+Parametric Predictors
+	*	Among fixed predictors, health_facility is a strong positive predictor (p < 0.001), meaning that healthcare access characteristics significantly influence delay outcomes.
+	*	Variables such as wealth_quintile, urban_rural, and mother_age show marginal significance (p ≈ 0.05–0.07), suggesting potential but weaker effects when adjusting for smooth terms.
+	*	Other variables (e.g., fever, cough) were not significant, implying that these symptoms alone do not predict delay independently of other covariates.
+
+Random Effects
+	*	The random intercept for country (variance ≈ 1.47e−03) captures baseline heterogeneity in delays across nations, highlighting geographical variability in treatment accessibility and response.
+	*	This supports the inclusion of random effects to properly model cross-country variation and avoid inflated Type I errors from assuming independence.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
